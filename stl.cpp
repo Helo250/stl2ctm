@@ -31,6 +31,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 #include "stl.h"
 
 #ifdef _MSC_VER
@@ -47,6 +48,17 @@ typedef uint32_t uint32;
 using namespace std;
 
 bool stl = STLB;
+float volume;
+float max_x = 0.0;
+float max_y = 0.0;
+float max_z = 0.0;
+float min_x = 0.0;
+float min_y = 0.0;
+float min_z = 0.0;
+float model_x = 0.0;
+float model_y = 0.0;
+float model_z = 0.0;
+// unsigned char
 
 
 /// Read a 32-bit integer, endian independent.
@@ -121,6 +133,16 @@ string remove_space(string& str){
     return str;
 }
 
+float SignedVolumeOfTriangle(SortVertex p1, SortVertex p2, SortVertex p3) {
+    float v321 = p3.x * p2.y * p1.z;
+    float v231 = p2.x * p3.y * p1.z;
+    float v312 = p3.x * p1.y * p2.z;
+    float v132 = p1.x * p3.y * p2.z;
+    float v213 = p2.x * p1.y * p3.z;
+    float v123 = p1.x * p2.y * p3.z;
+    return (1.0f/6.0f)*(-v321 + v231 + v312 - v132 - v213 + v123);
+}
+
 /// Import an STL file from a file.
 void Import_STL(const char * aFileName, Mesh * aMesh)
 {
@@ -175,12 +197,103 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
           vertices[index].y = v.y;
           vertices[index].z = v.z;
           vertices[index].mOldIndex = index;
+          max_x = max_x > v.x ? max_x : v.x;
+          max_y = max_y > v.y ? max_y : v.y;
+          max_z = max_z > v.z ? max_z : v.z;
+          min_x = min_x < v.x ? min_x : v.x;
+          min_y = min_y < v.y ? min_y : v.y;
+          min_z = min_z < v.z ? min_z : v.z;
         }
-
+        volume += SignedVolumeOfTriangle(vertices[i*3], vertices[i*3+1], vertices[i*3+2]);
         // Ignore the two fill bytes
         f.seekg(2, ios_base::cur);
       }
-
+      // caculate the model x y z and volume
+      model_x = max_x - min_x;
+      model_y = max_y - min_y;
+      model_z = max_z - min_z;
+      volume = std::abs(volume);
+      printf("\nThe model_x: %.0f mm\nThe model_y: %.0f mm\nThe model_z: %.0f mm\n", model_x, model_y, model_z);
+      printf("The model volume: %.0f mm3\n", volume);
+      // cout << "\nThe model_x: " << setprecision(2) << model_x/10 << " cm" << endl;
+      // cout << "The model_y: " << setprecision(2) << model_y/10 << " cm" << endl;
+      // cout << "The model_z: " << setprecision(2) << model_z/10 << " cm" << endl;
+      // cout << "The volume: " << setprecision(2) << volume << " cm3" << endl;
+      // Make sure that no redundant copies of vertices exist (STL files are full
+      // of vertex duplicates, so remove the redundancy), and store the data in
+      // the mesh object
+      sort(vertices.begin(), vertices.end());
+      aMesh->mVertices.resize(vertices.size());
+      aMesh->mIndices.resize(vertices.size());
+      SortVertex * firstEqual = &vertices[0];
+      int vertIdx = -1;
+      for(uint32 i = 0; i < vertices.size(); ++ i)
+      {
+        if((i == 0) ||
+           (vertices[i].z != firstEqual->z) ||
+           (vertices[i].y != firstEqual->y) ||
+           (vertices[i].x != firstEqual->x))
+        {
+          firstEqual = &vertices[i];
+          ++ vertIdx;
+          aMesh->mVertices[vertIdx] = Vector3(firstEqual->x, firstEqual->y, firstEqual->z);
+        }
+        // volume += std::abs(SignedVolumeOfTriangle(vertices[i], vertices[i+1], vertices[i+2]));
+        aMesh->mIndices[vertices[i].mOldIndex] = vertIdx;
+      }
+      aMesh->mVertices.resize(vertIdx + 1);
+    }
+  }
+  else{
+    vector<SortVertex> vertices;
+    uint32 index = 0;
+    bool loop = false;
+    // string line;
+    try{
+      while(!f.eof()){
+          Vector3 result;
+          std::getline(f, line);
+          line = remove_space(line);
+          // if (line.find("facet")==0){
+          //     sscanf(line.c_str(), "%*s %e %e %e", &result.x, &result.y, &result.z);
+          // }
+          // else 
+          if (line.find("outer") == 0){
+              loop = true;
+          }
+          else if (line.find("vertex") == 0 && loop){
+            sscanf(line.c_str(), "%*s %e %e %e", &result.x, &result.y, &result.z);
+            vertices.resize(index + 1);
+            vertices[index].x = result.x;
+            vertices[index].y = result.y;
+            vertices[index].z = result.z;
+            vertices[index].mOldIndex = index;
+            max_x = max_x > result.x ? max_x : result.x;
+            max_y = max_y > result.y ? max_y : result.y;
+            max_z = max_z > result.z ? max_z : result.z;
+            min_x = min_x < result.x ? min_x : result.x;
+            min_y = min_y < result.y ? min_y : result.y;
+            min_z = min_z < result.z ? min_z : result.z;
+            if (index % 3 == 0 && index > 0){
+              volume += SignedVolumeOfTriangle(vertices[index-3], vertices[index-2], vertices[index-1]);
+            }
+            index ++;
+          }
+          else if (line.find("endloop") == 0){
+            loop = false;
+          }
+      }
+      // caculate the model x y z and volume
+      model_x = (max_x - min_x);
+      model_y = (max_y - min_y);
+      model_z = (max_z - min_z);
+      volume = std::abs(volume);
+      printf("\nThe model_x: %.0f mm\nThe model_y: %.0f mm\nThe model_z: %.0f mm\n", model_x, model_y, model_z);
+      printf("The model volume: %.0f mm3\n", volume);
+      // cout << "\nThe model_x: " << setprecision(2) << model_x/10 << " cm" << endl;
+      // cout << "The model_y: " << setprecision(2) << model_y/10 << " cm" << endl;
+      // cout << "The model_z: " << setprecision(2) << model_z/10 << " cm" << endl;
+      // cout << "The volume: " << setprecision(2) << volume << " cm3" << endl;
       // Make sure that no redundant copies of vertices exist (STL files are full
       // of vertex duplicates, so remove the redundancy), and store the data in
       // the mesh object
@@ -204,58 +317,12 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
       }
       aMesh->mVertices.resize(vertIdx + 1);
     }
-  }
-  else{
-    vector<SortVertex> vertices;
-    uint32 index = 0;
-    // string line;
-    while(!f.eof()){
-        Vector3 result;
-        std::getline(f, line);
-        line = remove_space(line);
-        // if (line.find("facet")==0){
-        //     sscanf(line.c_str(), "%*s %e %e %e", &result.x, &result.y, &result.z);
-        // }
-        // else 
-        if (line.find("vertex") == 0){
-          sscanf(line.c_str(), "%*s %e %e %e", &result.x, &result.y, &result.z);
-          vertices.resize(index + 1);
-          vertices[index].x = result.x;
-          vertices[index].y = result.y;
-          vertices[index].z = result.z;
-          vertices[index].mOldIndex = index;
-          index ++;
-          // if (index % 100 == 0){
-          //   printf("vertex: %f, %f, %f\n", result.x, result.y, result.z);
-          // }
-        }
-        // if ((int) f.tellg() > 200) break;
+    catch(exception &e){
+      // pass
     }
-    // Make sure that no redundant copies of vertices exist (STL files are full
-    // of vertex duplicates, so remove the redundancy), and store the data in
-    // the mesh object
-    sort(vertices.begin(), vertices.end());
-    aMesh->mVertices.resize(vertices.size());
-    aMesh->mIndices.resize(vertices.size());
-    SortVertex * firstEqual = &vertices[0];
-    int vertIdx = -1;
-    for(uint32 i = 0; i < vertices.size(); ++ i)
-    {
-      if((i == 0) ||
-         (vertices[i].z != firstEqual->z) ||
-         (vertices[i].y != firstEqual->y) ||
-         (vertices[i].x != firstEqual->x))
-      {
-        firstEqual = &vertices[i];
-        ++ vertIdx;
-        aMesh->mVertices[vertIdx] = Vector3(firstEqual->x, firstEqual->y, firstEqual->z);
-      }
-      aMesh->mIndices[vertices[i].mOldIndex] = vertIdx;
-    }
-    aMesh->mVertices.resize(vertIdx + 1);
-  }
   // Close the input file
   f.close();
+  }
 }
 
 /// Export an STL file to a file.
