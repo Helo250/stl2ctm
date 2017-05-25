@@ -35,10 +35,10 @@ PNGLITEDIR = pnglite
 CPP = g++
 CPPFLAGS = -c -O3 -W -Wall `pkg-config --cflags gtk+-2.0` -I$(OPENCTMDIR) -I$(TINYXMLDIR)
 
-MESHOBJS = mesh.o meshio.o ctm.o stl.o 
+MESHOBJS = mesh.o meshio.o ctm.o stl.o
 CTMCONVOBJS = ctmconv.o common.o systimer.o convoptions.o $(MESHOBJS)
 
-all: ctmconv_test
+all: stl2ctm
 
 clean:
 	rm -f ctmconv  $(CTMCONVOBJS)
@@ -47,7 +47,7 @@ clean:
 libopenctm.so: $(OPENCTMDIR)/libopenctm.so
 	cp $< $@
 
-ctmconv_test: $(CTMCONVOBJS) $(TINYXMLDIR)/libtinyxml.a libopenctm.so
+stl2ctm: $(CTMCONVOBJS) $(TINYXMLDIR)/libtinyxml.a libopenctm.so
 	$(CPP) -s -o $@ -L$(OPENCTMDIR) -L$(TINYXMLDIR) $(CTMCONVOBJS) -Wl,-rpath,. -lopenctm -ltinyxml
 
 %.o: %.cpp

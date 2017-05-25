@@ -45,10 +45,13 @@ typedef uint32_t uint32;
 #define STLB 1
 #define COR3_MAX 200000
 #define FACE_MAX 200000
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 using namespace std;
 
 bool stl = STLB;
 float volume;
+float surface_area;
 float max_x = 0.0;
 float max_y = 0.0;
 float max_z = 0.0;
@@ -125,11 +128,11 @@ class SortVertex {
     }
 };
 
-string remove_space(string& str){ 
-    string buff(str); 
-    char space = ' '; 
-    str.assign(buff.begin() + buff.find_first_not_of(space), 
-        buff.begin() + buff.find_last_not_of(space) + 1); 
+string remove_space(string& str){
+    string buff(str);
+    char space = ' ';
+    str.assign(buff.begin() + buff.find_first_not_of(space),
+        buff.begin() + buff.find_last_not_of(space) + 1);
     return str;
 }
 
@@ -141,6 +144,13 @@ float SignedVolumeOfTriangle(SortVertex p1, SortVertex p2, SortVertex p3) {
     float v213 = p2.x * p1.y * p3.z;
     float v123 = p1.x * p2.y * p3.z;
     return (1.0f/6.0f)*(-v321 + v231 + v312 - v132 - v213 + v123);
+}
+
+float SingedAreaOfTriangle(SortVertex p1, SortVertex p2, SortVertex p3) {
+  float a = (p2.y-p1.y)*(p3.z-p1.z) - (p3.y-p1.y)*(p2.z-p1.z);
+  float b = (p2.z-p1.z)*(p3.x-p1.x) - (p2.x-p1.x)*(p3.z-p1.z);
+  float c = (p2.x-p1.x)*(p3.y-p1.y) - (p2.y-p1.y)*(p3.x-p1.x);
+  return (1.0f/2.0f)*sqrt(a*a + b*b + c*c);
 }
 
 /// Import an STL file from a file.
@@ -158,15 +168,22 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
   f.seekg(0, ios_base::end);
   uint32 fileSize = (uint32) f.tellg();
   string line;
+  string::size_type position;
   f.seekg(0, ios_base::beg);
   if(fileSize < 84)
     throw runtime_error("Invalid format - not a valid STL file.");
   std::getline(f, line);
 
   // parse the file is binary or ascii
-  if (line.find("solid") == 0){
-    stl = STLA;
+  position = line.find("solid");
+  if (position != line.npos) {
+    std::getline(f, line);
+    line = remove_space(line);
+    if (line.find("facet") == 0) {
+      stl = STLA;
+    }
   }
+
   if (stl == STLB){
     f.seekg(0, ios_base::beg);
     // Read header (80 character comment + triangle count)
@@ -197,13 +214,14 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
           vertices[index].y = v.y;
           vertices[index].z = v.z;
           vertices[index].mOldIndex = index;
-          max_x = max_x > v.x ? max_x : v.x;
-          max_y = max_y > v.y ? max_y : v.y;
-          max_z = max_z > v.z ? max_z : v.z;
-          min_x = min_x < v.x ? min_x : v.x;
-          min_y = min_y < v.y ? min_y : v.y;
-          min_z = min_z < v.z ? min_z : v.z;
+          max_x = MAX(max_x, v.x);
+          max_y = MAX(max_y, v.y);
+          max_z = MAX(max_z, v.z);
+          min_x = MIN(min_x, v.x);
+          min_y = MIN(min_y, v.y);
+          min_z = MIN(min_z, v.z);
         }
+        surface_area += SingedAreaOfTriangle(vertices[i*3], vertices[i*3+1], vertices[i*3+2]);
         volume += SignedVolumeOfTriangle(vertices[i*3], vertices[i*3+1], vertices[i*3+2]);
         // Ignore the two fill bytes
         f.seekg(2, ios_base::cur);
@@ -214,6 +232,7 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
       model_z = max_z - min_z;
       volume = std::abs(volume);
       printf("\nThe model_x: %.0f mm\nThe model_y: %.0f mm\nThe model_z: %.0f mm\n", model_x, model_y, model_z);
+      printf("The model surface_area: %.0f mm2\n", surface_area);
       printf("The model volume: %.0f mm3\n", volume);
       // cout << "\nThe model_x: " << setprecision(2) << model_x/10 << " cm" << endl;
       // cout << "The model_y: " << setprecision(2) << model_y/10 << " cm" << endl;
@@ -248,6 +267,7 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
     vector<SortVertex> vertices;
     uint32 index = 0;
     bool loop = false;
+
     // string line;
     try{
       while(!f.eof()){
@@ -257,7 +277,7 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
           // if (line.find("facet")==0){
           //     sscanf(line.c_str(), "%*s %e %e %e", &result.x, &result.y, &result.z);
           // }
-          // else 
+          // else
           if (line.find("outer") == 0){
               loop = true;
           }
@@ -268,14 +288,15 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
             vertices[index].y = result.y;
             vertices[index].z = result.z;
             vertices[index].mOldIndex = index;
-            max_x = max_x > result.x ? max_x : result.x;
-            max_y = max_y > result.y ? max_y : result.y;
-            max_z = max_z > result.z ? max_z : result.z;
-            min_x = min_x < result.x ? min_x : result.x;
-            min_y = min_y < result.y ? min_y : result.y;
-            min_z = min_z < result.z ? min_z : result.z;
+            max_x = MAX(max_x, result.x);
+            max_y = MAX(max_y, result.y);
+            max_z = MAX(max_z, result.z);
+            min_x = MIN(min_x, result.x);
+            min_y = MIN(min_y, result.y);
+            min_z = MIN(min_z, result.z);
             if (index % 3 == 0 && index > 0){
               volume += SignedVolumeOfTriangle(vertices[index-3], vertices[index-2], vertices[index-1]);
+              surface_area += SingedAreaOfTriangle(vertices[index-3], vertices[index-2], vertices[index-1]);
             }
             index ++;
           }
@@ -289,6 +310,7 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
       model_z = (max_z - min_z);
       volume = std::abs(volume);
       printf("\nThe model_x: %.0f mm\nThe model_y: %.0f mm\nThe model_z: %.0f mm\n", model_x, model_y, model_z);
+      printf("The model surface_area: %.0f mm2\n", surface_area);
       printf("The model volume: %.0f mm3\n", volume);
       // cout << "\nThe model_x: " << setprecision(2) << model_x/10 << " cm" << endl;
       // cout << "The model_y: " << setprecision(2) << model_y/10 << " cm" << endl;
@@ -320,9 +342,9 @@ void Import_STL(const char * aFileName, Mesh * aMesh)
     catch(exception &e){
       // pass
     }
+  }
   // Close the input file
   f.close();
-  }
 }
 
 /// Export an STL file to a file.
